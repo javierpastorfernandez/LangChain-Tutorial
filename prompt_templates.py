@@ -9,9 +9,23 @@ from gen_tools.tools import bcolors, init_logger,str2bool,get_cmap # , warn_func
 from langchain.prompts import ChatPromptTemplate
 import getpass
 
-# DEPRECATED: from langchain.chat_models import ChatOpenAI
-# # DEPRECATED: from langchain_community.chat_models import ChatOpenAI
+import logging
 
+
+# DEPRECATED: from langchain.chat_models import ChatOpenAI
+# DEPRECATED: from langchain_community.chat_models import ChatOpenAI
+
+# from langchain_huggingface import HuggingFaceEndpoint
+# DEPRECATED: pip install -U langchain-huggingface
+
+
+# pip install -U langchain-community
+# DEPRECATED from langchain.llms import HuggingFaceHub
+
+
+# pip install -U langchain-huggingface
+from langchain_huggingface import HuggingFaceEndpoint
+# from langchain_community.llms import HuggingFaceHub
 # pip install -U langchain-openai
 from langchain_openai import ChatOpenAI
 
@@ -21,6 +35,8 @@ def get_completion(prompt, model, option, template = None):
     
 
     if option=="openai":
+        gpt_family  = True
+
         response = openai.ChatCompletion.create(
             model=model,
             messages=messages,
@@ -29,7 +45,10 @@ def get_completion(prompt, model, option, template = None):
         response = response.choices[0].message["content"]
     
     elif option=="langchain":
+
         if model.split("-")[0]=="gpt":
+            gpt_family  = True
+
             # To control the randomness and creativity of the generated
             # text by an LLM, use temperature = 0.0
             llm = ChatOpenAI(
@@ -43,97 +62,114 @@ def get_completion(prompt, model, option, template = None):
                 # organization="...",
                 # other params...
             )
+        
+        else:
+            gpt_family  = False
 
-            # 1. BASIC INVOCATION 
-            log.info(bcolors.WARNING + " ======================================== 1. BASIC INVOCATION ======================================== " + bcolors.WHITE)
-            messages = [
-                (
-                    "system",
-                    "You are a helpful assistant that translates English to French. Translate the user sentence.",
-                ),
-                ("human", "I love programming."),
-            ]
-
-            log.info(bcolors.OKGREEN + "(messages): " + bcolors.WHITE + str(messages))
-
-            response = llm.invoke(messages)
-            log.info(bcolors.OKGREEN + "(response) complete: " + bcolors.WHITE + str(response))
-            log.info(bcolors.OKGREEN + "(response) content: " + bcolors.WHITE + str(response.content))
+            kwargs = {"max_length":128}
 
 
-            # 2. CHAINING 
-            log.info(bcolors.WARNING + " ======================================== 2. CHAINING (V1)======================================== " + bcolors.WHITE)
-            messages = [
-                            (
-                                "system",
-                                "You are a helpful assistant that translates {input_language} to {output_language}.",
-                            ),
-                            ("human", "{input}"),
-                        ]
-
-            prompt = ChatPromptTemplate.from_messages(messages)
-            log.info(bcolors.OKGREEN + "prompt: " + bcolors.WHITE + str(prompt))
-
-            chain = prompt | llm
-            response = chain.invoke(
-                {
-                    "input_language": "English",
-                    "output_language": "German",
-                    "input": "I love programming.",
-                })
+            """
+            The token used for authentication with Hugging Face has not been saved to the Git credentials helper
+            This will store the token securely, making future logins easier.
             
-            log.info(bcolors.OKGREEN + "(response) complete: " + bcolors.WHITE + str(response))
-            log.info(bcolors.OKGREEN + "(response) content: " + bcolors.WHITE + str(response.content))
-
-
-            # 3. CHAINING  - With Template from Template 
-            log.info(bcolors.WARNING + " ======================================== 3. CHAINING (V2)======================================== " + bcolors.WHITE)
-
-
-            template_string = """Translate the text \
-            that is delimited by triple backticks \
-            from {input_language} to {output_language} ```{input}```
+            The Credential is being stored locally 
             """
 
-            prompt = ChatPromptTemplate.from_template(template_string)
+            llm = HuggingFaceEndpoint(
+                repo_id=model,
+                temperature=0.5,
+                huggingfacehub_api_token=os.environ["HUGGINGFACEHUB_API_TOKEN"],
+                add_to_git_credential=True,  # This saves the token to the Git credential helper
+                **kwargs
+            )
 
-            # Original Prompt -> prompt_template.messages[0].prompt
-            # input variables -> prompt_template.messages[0].prompt.input_variables
+        # 1. BASIC INVOCATION 
+        log.info(bcolors.WARNING + " ======================================== 1. BASIC INVOCATION ======================================== " + bcolors.WHITE)
+        messages = [
+            (
+                "system",
+                "You are a helpful assistant that translates English to French. Translate the user sentence.",
+            ),
+            ("human", "I love programming."),
+        ]
 
-            log.info(bcolors.OKGREEN + "prompt: " + bcolors.WHITE + str(prompt))
+        log.info(bcolors.OKGREEN + "(messages): " + bcolors.WHITE + str(messages))
 
-            chain = prompt | llm
-            response = chain.invoke(
-                {
-                    "input_language": "English",
-                    "output_language": "German",
-                    "input": "I love programming.",
-                })
-            
-            log.info(bcolors.OKGREEN + "(response) complete: " + bcolors.WHITE + str(response))
-            log.info(bcolors.OKGREEN + "(response) content: " + bcolors.WHITE + str(response.content))
-
-
-
-            # 4. REFORMATING PROMPT TEMPLATE    
-            log.info(bcolors.WARNING + " ======================================== 3. CHAINING: REFORMATING PROMPT TEMPLATES ======================================== " + bcolors.WHITE)
-            
-            prompt_finetuned = prompt.format_messages(
-                output_language="French",
-                input_language = "English",
-                input="Hola me llamo Johny")
-
-            service_response = llm.invoke(prompt_finetuned)
-            log.info(bcolors.OKGREEN + "(service_response) complete: " + bcolors.WHITE + str(service_response))
-            log.info(bcolors.OKGREEN + "(service_response) content: " + bcolors.WHITE + str(service_response.content))
+        response = llm.invoke(messages)
+        log.info(bcolors.OKGREEN + "(response) complete: " + bcolors.WHITE + str(response))
+        if gpt_family: log.info(bcolors.OKGREEN + "(response) content: " + bcolors.WHITE + str(response.content))
 
 
+        # 2. CHAINING 
+        log.info(bcolors.WARNING + " ======================================== 2. CHAINING (V1)======================================== " + bcolors.WHITE)
+        messages = [
+                        (
+                            "system",
+                            "You are a helpful assistant that translates {input_language} to {output_language}.",
+                        ),
+                        ("human", "{input}"),
+                    ]
 
-            breakpoint()
+        prompt = ChatPromptTemplate.from_messages(messages)
+        log.info(bcolors.OKGREEN + "prompt: " + bcolors.WHITE + str(prompt))
 
-            
+        chain = prompt | llm
+        response = chain.invoke(
+            {
+                "input_language": "English",
+                "output_language": "German",
+                "input": "I love programming.",
+            })
+        
+        log.info(bcolors.OKGREEN + "(response) complete: " + bcolors.WHITE + str(response))
+        if gpt_family: log.info(bcolors.OKGREEN + "(response) content: " + bcolors.WHITE + str(response.content))
 
 
+        # 3. CHAINING  - With Template from Template 
+        log.info(bcolors.WARNING + " ======================================== 3. CHAINING (V2)======================================== " + bcolors.WHITE)
+
+
+        template_string = """Translate the text \
+        that is delimited by triple backticks \
+        from {input_language} to {output_language} ```{input}```
+        """
+
+        prompt = ChatPromptTemplate.from_template(template_string)
+
+        # Original Prompt -> prompt_template.messages[0].prompt
+        # input variables -> prompt_template.messages[0].prompt.input_variables
+
+        log.info(bcolors.OKGREEN + "prompt: " + bcolors.WHITE + str(prompt))
+
+        chain = prompt | llm
+        response = chain.invoke(
+            {
+                "input_language": "English",
+                "output_language": "German",
+                "input": "I love programming.",
+            })
+        
+        log.info(bcolors.OKGREEN + "(response) complete: " + bcolors.WHITE + str(response))
+        if gpt_family: log.info(bcolors.OKGREEN + "(response) content: " + bcolors.WHITE + str(response.content))
+
+
+
+        # 4. REFORMATING PROMPT TEMPLATE    
+        log.info(bcolors.WARNING + " ======================================== 3. CHAINING: REFORMATING PROMPT TEMPLATES ======================================== " + bcolors.WHITE)
+        
+        prompt_finetuned = prompt.format_messages(
+            output_language="French",
+            input_language = "English",
+            input="Hola me llamo Johny")
+
+
+        log.info(bcolors.OKGREEN + "prompt_finetuned: " + bcolors.WHITE + str(prompt_finetuned))
+        service_response = llm.invoke(prompt_finetuned)
+        log.info(bcolors.OKGREEN + "(service_response) complete: " + bcolors.WHITE + str(service_response))
+        if gpt_family: log.info(bcolors.OKGREEN + "(service_response) content: " + bcolors.WHITE + str(service_response.content))
+
+        
     return  response
 
 
@@ -164,8 +200,13 @@ def main(args):
     if not os.environ.get("OPENAI_API_KEY"):
         os.environ["OPENAI_API_KEY"] = getpass.getpass("Enter your OpenAI API key: ")
 
+    if not os.environ.get("HUGGINGFACEHUB_API_TOKEN"):
+        os.environ["HUGGINGFACEHUB_API_TOKEN"] = getpass.getpass("Enter your HUGGINFACEHUB API key: ")
+
     openai.api_key = os.environ['OPENAI_API_KEY']
     log.info(bcolors.OKGREEN + "open_ai key: " + bcolors.WHITE + str(openai.api_key))
+    log.info(bcolors.OKGREEN + "HUGGINGFACEHUB_API_TOKEN: " + bcolors.WHITE + str(os.environ["HUGGINGFACEHUB_API_TOKEN"]))
+
 
     customer_email = """
     Arrr, I be fuming that me blender lid \
@@ -189,9 +230,6 @@ def main(args):
     log.trace(bcolors.WARNING + "prompt: " + bcolors.WHITE + str(prompt))
     response = get_completion(prompt, llm_model, llm_option, template = None )
     log.trace(bcolors.WARNING + "response: " + bcolors.WHITE + str(response))
-
-
-
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
