@@ -15,9 +15,16 @@ import getpass
 
 from langchain.chains import RetrievalQA
 from langchain.chat_models import ChatOpenAI
+
 from langchain.indexes import VectorstoreIndexCreator
 from langchain.vectorstores import DocArrayInMemorySearch
 from langchain.document_loaders import PyPDFLoader
+
+#  ¡[Notes] Use this instead to avoid Warnings! 
+# from langchain.indexes import VectorstoreIndexCreator
+# from langchain_community.vectorstores import DocArrayInMemorySearch
+# from langchain_community.document_loaders import PyPDFLoader
+#  =========================================================================================
 
 from langchain_openai import ChatOpenAI
 from langchain_openai import OpenAIEmbeddings
@@ -48,6 +55,7 @@ def main(args):
 
     llm_model = config["llm"]["model"]
     log.info(bcolors.OKGREEN + "llm_model: " + bcolors.WHITE + str(llm_model))
+    # llm_model="gpt-3.5-turbo-0301" # DEPRECATED:  TODO: HARDCODED
 
     execution_stages = config["llm"]["stages"]
     log.info(bcolors.OKGREEN + "execution_stages: " + bcolors.WHITE + str(execution_stages))
@@ -106,7 +114,7 @@ def main(args):
         }]
     
     # QA generation chain, basically a LLM chain that creates a question-answer pair from each document. 
-    qa_llm_chain = QAGenerateChain.from_llm(ChatOpenAI(model=llm_model))
+    qa_llm_chain = QAGenerateChain.from_llm(llm)
     # output_parser = StructuredOutputParser
 
     input_data = [{"doc": t} for t in data[:5]]
@@ -115,6 +123,9 @@ def main(args):
 
     # TODO: HARDCODED
     examples = [example["qa_pairs"] for example in query_n_responses]
+    # new_examples = example_gen_chain.apply_and_parse([{“doc”: data[:5]}])
+
+
 
     langchain.debug = True
     query_index = np.min([2, len(query_n_responses)-1])
@@ -123,11 +134,12 @@ def main(args):
     log.trace(bcolors.OKGREEN + "(response) Ground Truth: " + bcolors.WHITE + str(examples[query_index]["answer"]))
 
     # You can pass both Queries & The whole dictionary, because the Chain will arrange correct input to the LLM 
-    queries = [example["query"] for example in examples]
-    predictions = qa.batch(queries)
-    # predictions = qa.batch(examples)
-
+    # queries = [example["query"] for example in examples]
+    # predictions = qa.batch(queries) # Output Dictionary Contains (Queries & Results)
+    predictions = qa.batch(examples) # Output Dictionary Contains (Queries & Results & Answers)
     eval_chain = QAEvalChain.from_llm(llm)
+
+    # This is raising errors 
     graded_outputs = eval_chain.evaluate(examples, predictions)
 
 
