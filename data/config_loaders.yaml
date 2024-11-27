@@ -1,0 +1,11 @@
+general:
+llm:
+  option: langchain # openai, langchain
+  model: "gpt-3.5-turbo"
+  # stages: ["html", "notion", "general"]
+  stages: ["general"]
+
+  #model: "mistralai/Mixtral-8x7B-Instruct-v0.1"
+  # gpt-3.5-turbo-0125
+
+
