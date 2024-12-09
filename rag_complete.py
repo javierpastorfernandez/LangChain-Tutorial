@@ -35,7 +35,8 @@ import numpy as np
 import langchain
 import openai
 
-
+from langchain.chains import ConversationalRetrievalChain
+from langchain.memory import ConversationBufferMemory
 
 def main(args):
     log = logging.getLogger('logger')
@@ -200,6 +201,29 @@ def main(args):
         question = "why are those prerequesites needed?"
         response = qa_chain({"query": question})
         log.info(bcolors.OKGREEN + "(qa_chain) response: " + bcolors.WHITE + str(response["result"]))
+
+
+    if "chatbot_complete" in execution_stages:
+
+        question = "Is probability a class topic?"
+
+        memory = ConversationBufferMemory(
+            memory_key="chat_history",
+            return_messages=True
+        )
+        qa_chain = ConversationalRetrievalChain.from_llm(
+            llm,
+            retriever=vectordb.as_retriever(),
+            memory=memory
+        )
+        langchain.debug = True
+
+        response = qa_chain.invoke({"question": question})
+        log.info(bcolors.OKGREEN + "(qa_chain) response: " + bcolors.WHITE + str(response["answer"]))
+
+        question = "why are those prerequesites needed?"
+        response = qa_chain.invoke({"question": question})
+        log.info(bcolors.OKGREEN + "(qa_chain) response: " + bcolors.WHITE + str(response["answer"]))
 
 
 
