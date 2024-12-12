@@ -7,6 +7,7 @@ import logging
 import sys,os,glob
 from gen_tools.tools import bcolors, init_logger,str2bool,get_cmap # , warn_function
 
+import langchain
 from langchain.prompts import PromptTemplate, ChatPromptTemplate
 from langchain.output_parsers import ResponseSchema
 from langchain.output_parsers import StructuredOutputParser
@@ -24,7 +25,7 @@ from langchain.chains import SequentialChain, SimpleSequentialChain
 from langchain_core.runnables import RunnableParallel
 from langchain_core.runnables.passthrough import RunnablePick
 from langchain_core.output_parsers import StrOutputParser
-
+from langchain_core.runnables.base import RunnableMap
 
 from langchain.chains.router import MultiPromptChain
 from langchain.chains.router.llm_router import LLMRouterChain,RouterOutputParser
@@ -34,6 +35,7 @@ from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 from operator import itemgetter
 from typing import Literal
 from typing_extensions import TypedDict
+import json
 
 
 def get_completion(prompt, model, option, template = None, execution_stages = []):
@@ -516,7 +518,7 @@ def get_completion(prompt, model, option, template = None, execution_stages = []
             ]
 
 
-            option = 2 
+            option = 2
             destination_chains = {}
             for p_info in prompt_infos:
                 name = p_info["name"]
@@ -598,13 +600,6 @@ def get_completion(prompt, model, option, template = None, execution_stages = []
                     """Route query to destination."""
                     destination: Literal["physics", "math", "History","computer science"]
 
-                """
-                route_chain = (
-                    router_prompt
-                    | llm.with_structured_output(RouteQuery)
-                    | itemgetter("destination")
-                )
-                """
 
                 route_chain = (
                     router_prompt
@@ -612,74 +607,121 @@ def get_completion(prompt, model, option, template = None, execution_stages = []
                     |StrOutputParser()
                 )
 
-                def routing_logic(destination, next_inputs):
+
+                route_chain_2 = (
+                    router_prompt
+                    |llm 
+                    |{"routing_command": StrOutputParser()}
+                )
+
+
+        
+                def routing_logic(x):
                     log = logging.getLogger('logger')
+
+                    log.info(bcolors.OKGREEN + "(routing_logic) x: " + bcolors.WHITE + str(x))
+                    x = x["routing_command"]
+
+                    if isinstance(x, str):
+                        # Step 1: Remove enclosing markdown formatting and whitespace
+                        cleaned_output = x.strip('`').strip('json\n').strip()
+
+                        # Step 2: Parse the cleaned JSON string
+                        try:
+                            parsed_output = json.loads(cleaned_output)
+
+                        except json.JSONDecodeError as e:
+                            print(f"Failed to parse JSON: {e}")
+
+                    else:
+                        parsed_output = x 
+
+                    destination = parsed_output['destination']
+                    next_inputs = parsed_output['next_inputs']
+
                     log.info(bcolors.OKGREEN + "destination: " + bcolors.WHITE + str(destination))
                     log.info(bcolors.OKGREEN + "next_inputs: " + bcolors.WHITE + str(next_inputs))
 
                     # Select the template based on the destination
-                    if destination == "physics":
-                        return destination_chains[destination]
-                    elif destination == "math":
-                        return destination_chains[destination]
-                    elif destination == "History":
-                        return destination_chains[destination]
-                    elif destination == "computer science":
-                        return destination_chains[destination]
+                    if destination in ["physics", "math", "History","computer science"]:
+                        destination_chain = destination_chains[destination]
                     else:
-                        return default_chain    # Return default template for handling by the default chain
+                        destination_chain = default_chain
 
-
-                """
-                chain = {
-                    "destination": route_chain,  # 
-                    "next_inputs": lambda x: x["input"],  # pass input to the Route Chain -> should match to the RouterChain Input variables
-                } | RunnableLambda(routing_lambda) |llm
-                
-                """
-
-                breakpoint()
+                    return destination_chain.invoke({"input": next_inputs})
+           
                 # Define a RunnableLambda chain for routing
                 routing_chain = RunnableLambda(
-                    func=lambda x: routing_logic(x['destination'], x['next_inputs']), 
+                    func=lambda x: routing_logic(x), 
                 )
 
-                combined_chain = route_chain | routing_chain | llm
+                def transform_logic(x):
+                    log = logging.getLogger('logger')
+                    log.info(bcolors.OKGREEN + "(transform_logic) x: " + bcolors.WHITE + str(x))
 
-            
+                    x = x["routing_command"]
+
+                    if isinstance(x, str):
+                        # Step 1: Remove enclosing markdown formatting and whitespace
+                        cleaned_output = x.strip('`').strip('json\n').strip()
+
+                        # Step 2: Parse the cleaned JSON string
+                        try:
+                            parsed_output = json.loads(cleaned_output)
+
+                        except json.JSONDecodeError as e:
+                            print(f"Failed to parse JSON: {e}")
+                    else:
+                        parsed_output = x 
+
+                    next_inputs = parsed_output['next_inputs']
+                    log.info(bcolors.OKGREEN + "next_inputs: " + bcolors.WHITE + str(next_inputs))
+                    
+                    return next_inputs
+
+                # Define a RunnableLambda chain for routing
+                transforming_chain = RunnableLambda(
+                    func=lambda x: transform_logic(x), 
+                )
+                
+                """
+                # El orden es siempre de izquierda a derecha 
+                combined_chain = route_chain | routing_chain | llm
+                combined_chain_reduced = route_chain | routing_chain 
+                """
+
+                combined_chain_reduced = RunnableParallel({
+                    "input": RunnablePick("input"),
+                    # Launches the Route Chain, which will output a string formatted as JSON with Destination Chain & Next Inputs
+                    "routing_command": RunnableLambda(lambda input_data: route_chain_2.invoke({"input": input_data}))
+
+                    # OPTION 1 : "routing_command": RunnableLambda(lambda input_data: route_chain_2.invoke({"input": input_data})) 
+                    # {'routing_command': '```json\n{\n    "destination": "computer science",\n    "next_inputs": "What is Generative AI in the field of computer science?"\n}\n```'}
+
+                }) | RunnableParallel({
+                    "input": RunnablePick("input"),
+                    "routing_command": RunnablePick("routing_command"),
+                    "next_inputs": RunnablePick("routing_command") | transforming_chain,
+                    "response": RunnablePick("routing_command") | routing_chain | StrOutputParser()
+                })
+
+                """
+                langchains:INFO:737| response: {'input': 'What is Generative AI?', 'routing_command': {'routing_command': '```json\n{\n    "destination": "computer science",\n    "next_inputs": "What is Generative AI in the field of computer science?"\n}\n```'}}
+                """
+
             if option==1:
                 chain = MultiPromptChain(router_chain=router_chain, 
                                         destination_chains=destination_chains, 
                                         default_chain=default_chain, verbose=True)
-                response = chain.run("What is Generative AI?")
+                response = chain.invoke({"input": "What is Generative AI?"})
 
             elif option==2:
-                breakpoint()
-                response = route_chain.invoke({"input": "What is Generative AI?"})
+                response = route_chain_2.invoke({"input": "What is Generative AI?"})
                 log.info(bcolors.OKGREEN + "(route_chain) response: " + bcolors.WHITE + str(response))
 
-                breakpoint()
-                response = combined_chain.invoke({"input": "What is Generative AI?"})
+                langchain.debug = True
+                response = combined_chain_reduced.invoke({"input": "What is Generative AI?"})
                 log.info(bcolors.OKGREEN + "response: " + bcolors.WHITE + str(response))
-
-                breakpoint()
-
-            log.info(bcolors.OKGREEN + "(response) content: " + bcolors.WHITE + str(response))
-            breakpoint()
-
-
-        response = llm.invoke(prompt_finetuned)
-
-        if gpt_family: 
-            log.info(bcolors.OKGREEN + "(response) content: " + bcolors.WHITE + str(response.content))
-            output_dict = output_parser.parse(response.content)
-        else:
-            output_dict = output_parser.parse(response)
-            log.info(bcolors.OKGREEN + "(response) content: " + bcolors.WHITE + str(response))
-
-        log.info(bcolors.OKGREEN + "output_dict: " + bcolors.WHITE + str(output_dict))
-
-
 
 
 
@@ -719,9 +761,7 @@ def main(args):
     log.info(bcolors.OKGREEN + "open_ai key: " + bcolors.WHITE + str(openai.api_key))
     log.info(bcolors.OKGREEN + "HUGGINGFACEHUB_API_TOKEN: " + bcolors.WHITE + str(os.environ["HUGGINGFACEHUB_API_TOKEN"]))
 
-
-    response = get_completion(None, llm_model, llm_option, template = None, execution_stages = execution_stages)
-    log.trace(bcolors.WARNING + "response: " + bcolors.WHITE + str(response))
+    get_completion(None, llm_model, llm_option, template = None, execution_stages = execution_stages)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
