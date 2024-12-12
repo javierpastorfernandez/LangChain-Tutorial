@@ -202,27 +202,25 @@ class cbfs(param.Parameterized):
     db_query  = param.String("")
     db_response = param.List([])
     
-    def __init__(self, llm_model,  file_input, folder_input, button_load, inp, **params):
+    def __init__(self, llm_model, folder_input, button_load, inp, **params):
         super().__init__(**params)  # Initialize with the remaining params
         self.llm_model = llm_model  # Explicitly assign the llm_model
-        self.file_input = file_input
         self.folder_input  = folder_input 
         self.button_load = button_load
         self.inp = inp
         self.panels = []
 
-        # self.loaded_file = "data/lecture notes/cs229/cs229-notes1.pdf"
-        self.loaded_file = "data/Notion_DB/Blendle's Employee Handbook a834d55573614857a48a9ce9ec4194e3.md"
+        self.loaded_files = "data/Notion_DB/Blendle's Employee Handbook a834d55573614857a48a9ce9ec4194e3.md"
 
-        documents = load_documents(self.loaded_file)
+        documents = load_documents(self.loaded_files)
         self.qa = create_db(documents, self.llm_model, "stuff", 4)
 
 
 
     def call_load_documents(self, count):
         log = logging.getLogger("logger")
-        if count == 0 or ((self.file_input.value is None) and  (self.folder_input.value is None)): # init or no file specified :
-            return pn.pane.Markdown(f"Loaded File: {self.loaded_file}")
+        if count == 0 or (self.folder_input.value is None): # init or no file specified :
+            return pn.pane.Markdown(f"Loaded File: {self.loaded_files}", width=300)
         else:
             # Priority Given To Folder Selector 
 
@@ -248,13 +246,6 @@ class cbfs(param.Parameterized):
                             document_paths.append(path)
 
 
-            elif (self.file_input.value != None):
-                # Saving the contents of the file in a PDF. Might not work for many types of document 
-                self.file_input.save("temp.pdf")  # local copy
-                self.loaded_file = self.file_input.filename
-                self.button_load.button_style="outline"
-                document_paths = load_documents("temp.pdf")
-
             log.info(bcolors.OKGREEN + "document_paths: " + bcolors.WHITE + str(document_paths))
 
             documents = []
@@ -266,8 +257,9 @@ class cbfs(param.Parameterized):
             self.qa = create_db(documents, self.llm_model, "stuff", 4)
             self.button_load.button_style="solid"
 
+        self.loaded_files = document_paths
         self.clr_history()
-        return pn.pane.Markdown(f"Loaded File: {self.loaded_file}")
+        return pn.pane.Markdown(f"Loaded Files:\n{document_paths}", width=300)
 
     def convchain(self, query):
         if not query:
@@ -385,12 +377,11 @@ def main(args):
     log.info(bcolors.OKGREEN + "HUGGINGFACEHUB_API_TOKEN: " + bcolors.WHITE + str(os.environ["HUGGINGFACEHUB_API_TOKEN"]))
 
     # Widgets
-    file_input = pn.widgets.FileInput(accept='.pdf', multiple=True)  # Allow multiple files
     folder_input = pn.widgets.FileSelector(name ="Select folder")  # Allow folder selection
 
     button_load = pn.widgets.Button(name="Load DB", button_type='primary')
     inp = pn.widgets.TextInput( placeholder='Enter text here…')
-    cb = cbfs(llm_model = llm_model,  file_input = file_input, folder_input  = folder_input,  button_load = button_load, inp = inp)
+    cb = cbfs(llm_model = llm_model, folder_input  = folder_input,  button_load = button_load, inp = inp)
 
 
     button_clearhistory = pn.widgets.Button(name="Clear History", button_type='warning')
@@ -417,7 +408,7 @@ def main(args):
         pn.layout.Divider(),
     )
     tab4=pn.Column(
-        pn.Row(file_input, folder_input, button_load, bound_button_load),
+        pn.Row(folder_input, button_load, bound_button_load),
         pn.Row( button_clearhistory, pn.pane.Markdown("Clears chat history. Can use to start a new topic" )),
         pn.layout.Divider(),
         pn.Row(jpg_pane.clone(width=400))
